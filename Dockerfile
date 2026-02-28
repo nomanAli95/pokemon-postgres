@@ -1,4 +1,4 @@
-FROM postgres:16-alpine
+FROM postgres:18-alpine
 
 ENV POSTGRES_USER=ash
 ENV POSTGRES_PASSWORD=pikachu
