@@ -1,6 +1,7 @@
 -- 1. generations
 CREATE TABLE generations (
     id          INTEGER PRIMARY KEY,
+    main_region TEXT,
     identifier  TEXT NOT NULL
 );
 
@@ -8,7 +9,8 @@ CREATE TABLE generations (
 CREATE TABLE types (
     id            INTEGER PRIMARY KEY,
     identifier    TEXT NOT NULL,
-    generation_id INTEGER REFERENCES generations(id)
+    generation_id INTEGER REFERENCES generations(id),
+    damage_class  TEXT
 );
 
 -- 3. pokemon_species
@@ -17,10 +19,22 @@ CREATE TABLE pokemon_species (
     identifier               TEXT NOT NULL,
     generation_id            INTEGER REFERENCES generations(id),
     evolves_from_species_id  INTEGER REFERENCES pokemon_species(id),
+    evolution_chain_id       INTEGER,
     color                    TEXT,
     shape                    TEXT,
+    habitat                  TEXT,
+    gender_rate              INTEGER,
+    capture_rate             INTEGER,
+    base_happiness           INTEGER,
+    is_baby                  BOOLEAN NOT NULL DEFAULT FALSE,
+    hatch_counter            INTEGER,
+    has_gender_differences   BOOLEAN NOT NULL DEFAULT FALSE,
+    growth_rate              TEXT,
+    forms_switchable         BOOLEAN NOT NULL DEFAULT FALSE,
     is_legendary             BOOLEAN NOT NULL DEFAULT FALSE,
-    is_mythical              BOOLEAN NOT NULL DEFAULT FALSE
+    is_mythical              BOOLEAN NOT NULL DEFAULT FALSE,
+    sort_order               INTEGER,
+    conquest_order           INTEGER
 );
 
 -- 4. pokemon
@@ -30,7 +44,9 @@ CREATE TABLE pokemon (
     species_id      INTEGER REFERENCES pokemon_species(id),
     height          INTEGER,
     weight          INTEGER,
-    base_experience INTEGER
+    base_experience INTEGER,
+    sort_order      INTEGER,
+    is_default      BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 -- 5. pokemon_stats
@@ -69,15 +85,21 @@ CREATE TABLE pokemon_abilities (
 
 -- 9. moves
 CREATE TABLE moves (
-    id             INTEGER PRIMARY KEY,
-    identifier     TEXT NOT NULL,
-    generation_id  INTEGER REFERENCES generations(id),
-    type_id        INTEGER REFERENCES types(id),
-    power          INTEGER,
-    pp             INTEGER,
-    accuracy       INTEGER,
-    priority       INTEGER NOT NULL DEFAULT 0,
-    damage_class   TEXT
+    id                      INTEGER PRIMARY KEY,
+    identifier              TEXT NOT NULL,
+    generation_id           INTEGER REFERENCES generations(id),
+    type_id                 INTEGER REFERENCES types(id),
+    power                   INTEGER,
+    pp                      INTEGER,
+    accuracy                INTEGER,
+    priority                INTEGER NOT NULL DEFAULT 0,
+    target                  TEXT,
+    damage_class            TEXT,
+    effect_id               INTEGER,
+    effect_chance           INTEGER,
+    contest_type_id         INTEGER,
+    contest_effect_id       INTEGER,
+    super_contest_effect_id INTEGER
 );
 
 -- View: pokemon_overview

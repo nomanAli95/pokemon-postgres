@@ -17,35 +17,54 @@ psql_as_ash() {
 
 # ---------- generations ----------
 csv=$(download generations)
+csv_regions=$(download regions)
 psql_as_ash <<SQL
 CREATE TEMP TABLE tmp_generations (
     id             INTEGER,
     main_region_id INTEGER,
     identifier     TEXT
 );
+CREATE TEMP TABLE tmp_regions (id INTEGER, identifier TEXT);
 \COPY tmp_generations FROM '$csv' CSV HEADER;
-INSERT INTO generations (id, identifier)
-SELECT id, identifier FROM tmp_generations ON CONFLICT DO NOTHING;
+\COPY tmp_regions FROM '$csv_regions' CSV HEADER;
+INSERT INTO generations (id, main_region, identifier)
+SELECT g.id, r.identifier, g.identifier
+FROM tmp_generations g
+LEFT JOIN tmp_regions r ON r.id = g.main_region_id
+ON CONFLICT DO NOTHING;
 SQL
 
 # ---------- types ----------
 csv=$(download types)
 psql_as_ash <<SQL
 CREATE TEMP TABLE tmp_types (
-    id            INTEGER,
-    identifier    TEXT,
-    generation_id INTEGER,
-    damage_class  TEXT
+    id              INTEGER,
+    identifier      TEXT,
+    generation_id   INTEGER,
+    damage_class_id INTEGER
 );
 \COPY tmp_types FROM '$csv' CSV HEADER;
-INSERT INTO types (id, identifier, generation_id)
-SELECT id, identifier, NULLIF(generation_id::text,'')::int
+INSERT INTO types (id, identifier, generation_id, damage_class)
+SELECT
+    id,
+    identifier,
+    NULLIF(generation_id::text,'')::int,
+    CASE damage_class_id
+        WHEN 1 THEN 'status'
+        WHEN 2 THEN 'physical'
+        WHEN 3 THEN 'special'
+        ELSE NULL
+    END
 FROM tmp_types
 ON CONFLICT DO NOTHING;
 SQL
 
 # ---------- pokemon_species ----------
 csv=$(download pokemon_species)
+csv_colors=$(download pokemon_colors)
+csv_shapes=$(download pokemon_shapes)
+csv_habitats=$(download pokemon_habitats)
+csv_growth_rates=$(download growth_rates)
 psql_as_ash <<SQL
 CREATE TEMP TABLE tmp_pokemon_species (
     id                       INTEGER,
@@ -66,19 +85,53 @@ CREATE TEMP TABLE tmp_pokemon_species (
     forms_switchable         INTEGER,
     is_legendary             INTEGER,
     is_mythical              INTEGER,
-    order_col                INTEGER,
+    sort_order               INTEGER,
     conquest_order           TEXT
 );
-\COPY tmp_pokemon_species FROM '$csv' CSV HEADER;
-INSERT INTO pokemon_species (id, identifier, generation_id, evolves_from_species_id, is_legendary, is_mythical)
+CREATE TEMP TABLE tmp_pokemon_colors    (id INTEGER, identifier TEXT);
+CREATE TEMP TABLE tmp_pokemon_shapes    (id INTEGER, identifier TEXT);
+CREATE TEMP TABLE tmp_pokemon_habitats  (id INTEGER, identifier TEXT);
+CREATE TEMP TABLE tmp_growth_rates      (id INTEGER, identifier TEXT, formula TEXT);
+\COPY tmp_pokemon_species   FROM '$csv'             CSV HEADER;
+\COPY tmp_pokemon_colors    FROM '$csv_colors'      CSV HEADER;
+\COPY tmp_pokemon_shapes    FROM '$csv_shapes'      CSV HEADER;
+\COPY tmp_pokemon_habitats  FROM '$csv_habitats'    CSV HEADER;
+\COPY tmp_growth_rates      FROM '$csv_growth_rates' CSV HEADER;
+INSERT INTO pokemon_species (
+    id, identifier, generation_id, evolves_from_species_id,
+    evolution_chain_id, color, shape, habitat,
+    gender_rate, capture_rate, base_happiness,
+    is_baby, hatch_counter, has_gender_differences,
+    growth_rate, forms_switchable,
+    is_legendary, is_mythical,
+    sort_order, conquest_order
+)
 SELECT
-    id,
-    identifier,
-    NULLIF(generation_id::text,'')::int,
-    NULLIF(evolves_from_species_id,'')::int,
-    is_legendary::boolean,
-    is_mythical::boolean
-FROM tmp_pokemon_species
+    s.id,
+    s.identifier,
+    NULLIF(s.generation_id::text,'')::int,
+    NULLIF(s.evolves_from_species_id,'')::int,
+    s.evolution_chain_id,
+    c.identifier,
+    sh.identifier,
+    h.identifier,
+    s.gender_rate,
+    s.capture_rate,
+    s.base_happiness,
+    s.is_baby::boolean,
+    s.hatch_counter,
+    s.has_gender_differences::boolean,
+    gr.identifier,
+    s.forms_switchable::boolean,
+    s.is_legendary::boolean,
+    s.is_mythical::boolean,
+    s.sort_order,
+    NULLIF(s.conquest_order,'')::int
+FROM tmp_pokemon_species s
+LEFT JOIN tmp_pokemon_colors   c  ON c.id  = s.color_id
+LEFT JOIN tmp_pokemon_shapes   sh ON sh.id = s.shape_id
+LEFT JOIN tmp_pokemon_habitats h  ON h.id  = NULLIF(s.habitat_id,'')::int
+LEFT JOIN tmp_growth_rates     gr ON gr.id = s.growth_rate_id
 ON CONFLICT DO NOTHING;
 SQL
 
@@ -92,18 +145,20 @@ CREATE TEMP TABLE tmp_pokemon (
     height          INTEGER,
     weight          INTEGER,
     base_experience TEXT,
-    order_col       INTEGER,
+    sort_order      INTEGER,
     is_default      INTEGER
 );
 \COPY tmp_pokemon FROM '$csv' CSV HEADER;
-INSERT INTO pokemon (id, identifier, species_id, height, weight, base_experience)
+INSERT INTO pokemon (id, identifier, species_id, height, weight, base_experience, sort_order, is_default)
 SELECT
     id,
     identifier,
     NULLIF(species_id::text,'')::int,
     height,
     weight,
-    NULLIF(base_experience,'')::int
+    NULLIF(base_experience,'')::int,
+    sort_order,
+    is_default::boolean
 FROM tmp_pokemon
 ON CONFLICT DO NOTHING;
 SQL
@@ -158,42 +213,58 @@ SQL
 
 # ---------- moves ----------
 csv=$(download moves)
+csv_targets=$(download move_targets)
 psql_as_ash <<SQL
 CREATE TEMP TABLE tmp_moves (
-    id                  INTEGER,
-    identifier          TEXT,
-    generation_id       INTEGER,
-    type_id             INTEGER,
-    power               TEXT,
-    pp                  TEXT,
-    accuracy            TEXT,
-    priority            INTEGER,
-    target_id           INTEGER,
-    damage_class_id     INTEGER,
-    effect_id           INTEGER,
-    effect_chance       TEXT,
-    contest_type_id     TEXT,
-    contest_effect_id   TEXT,
+    id                      INTEGER,
+    identifier              TEXT,
+    generation_id           INTEGER,
+    type_id                 INTEGER,
+    power                   TEXT,
+    pp                      TEXT,
+    accuracy                TEXT,
+    priority                INTEGER,
+    target_id               INTEGER,
+    damage_class_id         INTEGER,
+    effect_id               INTEGER,
+    effect_chance           TEXT,
+    contest_type_id         TEXT,
+    contest_effect_id       TEXT,
     super_contest_effect_id TEXT
 );
-\COPY tmp_moves FROM '$csv' CSV HEADER;
-INSERT INTO moves (id, identifier, generation_id, type_id, power, pp, accuracy, priority, damage_class)
+CREATE TEMP TABLE tmp_move_targets (id INTEGER, identifier TEXT);
+\COPY tmp_moves        FROM '$csv'         CSV HEADER;
+\COPY tmp_move_targets FROM '$csv_targets' CSV HEADER;
+INSERT INTO moves (
+    id, identifier, generation_id, type_id,
+    power, pp, accuracy, priority,
+    target, damage_class,
+    effect_id, effect_chance,
+    contest_type_id, contest_effect_id, super_contest_effect_id
+)
 SELECT
-    id,
-    identifier,
-    NULLIF(generation_id::text,'')::int,
-    NULLIF(type_id::text,'')::int,
-    NULLIF(power,'')::int,
-    NULLIF(pp,'')::int,
-    NULLIF(accuracy,'')::int,
-    priority,
-    CASE damage_class_id
+    m.id,
+    m.identifier,
+    NULLIF(m.generation_id::text,'')::int,
+    NULLIF(m.type_id::text,'')::int,
+    NULLIF(m.power,'')::int,
+    NULLIF(m.pp,'')::int,
+    NULLIF(m.accuracy,'')::int,
+    m.priority,
+    mt.identifier,
+    CASE m.damage_class_id
         WHEN 1 THEN 'status'
         WHEN 2 THEN 'physical'
         WHEN 3 THEN 'special'
         ELSE NULL
-    END
-FROM tmp_moves
+    END,
+    m.effect_id,
+    NULLIF(m.effect_chance,'')::int,
+    NULLIF(m.contest_type_id,'')::int,
+    NULLIF(m.contest_effect_id,'')::int,
+    NULLIF(m.super_contest_effect_id,'')::int
+FROM tmp_moves m
+LEFT JOIN tmp_move_targets mt ON mt.id = m.target_id
 ON CONFLICT DO NOTHING;
 SQL
 
