@@ -1,0 +1,15 @@
+services:
+  db:
+    build: .
+    ports:
+      - "5432:5432"
+    volumes:
+      - pokedex_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ash -d pokedex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pokedex_data:
