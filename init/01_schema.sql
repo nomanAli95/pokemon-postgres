@@ -102,6 +102,15 @@ CREATE TABLE moves (
     super_contest_effect_id INTEGER
 );
 
+-- 10. pokemon_sprites
+CREATE TABLE pokemon_sprites (
+    pokemon_id           INTEGER PRIMARY KEY REFERENCES pokemon(id),
+    front_default        BYTEA,
+    front_shiny          BYTEA,
+    back_default         BYTEA,
+    official_artwork_url TEXT
+);
+
 -- View: pokemon_overview
 CREATE VIEW pokemon_overview AS
 SELECT
@@ -118,7 +127,9 @@ SELECT
     MAX(CASE WHEN pst.stat_id = 4 THEN pst.base_stat END) AS sp_attack,
     MAX(CASE WHEN pst.stat_id = 5 THEN pst.base_stat END) AS sp_defense,
     MAX(CASE WHEN pst.stat_id = 6 THEN pst.base_stat END) AS speed,
-    SUM(pst.base_stat)                                  AS base_stat_total
+    SUM(pst.base_stat)                                  AS base_stat_total,
+    spr.front_default,
+    spr.official_artwork_url
 FROM pokemon p
 JOIN pokemon_species ps       ON ps.id = p.species_id
 LEFT JOIN pokemon_types pt1   ON pt1.pokemon_id = p.id AND pt1.slot = 1
@@ -126,5 +137,6 @@ LEFT JOIN types t1            ON t1.id = pt1.type_id
 LEFT JOIN pokemon_types pt2   ON pt2.pokemon_id = p.id AND pt2.slot = 2
 LEFT JOIN types t2            ON t2.id = pt2.type_id
 LEFT JOIN pokemon_stats pst   ON pst.pokemon_id = p.id
+LEFT JOIN pokemon_sprites spr ON spr.pokemon_id = p.id
 GROUP BY p.id, p.identifier, ps.color, ps.is_legendary, ps.is_mythical,
-         t1.identifier, t2.identifier;
+         t1.identifier, t2.identifier, spr.front_default, spr.official_artwork_url;

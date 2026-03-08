@@ -1,6 +1,10 @@
 # pokemon-postgres
 
-A PostgreSQL 16 Docker image pre-seeded with Pokémon data from [veekun/pokedex](https://github.com/veekun/pokedex).
+A PostgreSQL 16 Docker image pre-seeded with a complete Pokédex: data from [veekun/pokedex](https://github.com/veekun/pokedex) and sprites from [PokeAPI/sprites](https://github.com/PokeAPI/sprites).
+
+| Bulbasaur | Charmander | Squirtle |
+|:---------:|:----------:|:--------:|
+| ![Bulbasaur](https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/1.png) | ![Charmander](https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/4.png) | ![Squirtle](https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/7.png) |
 
 ---
 
@@ -10,13 +14,9 @@ A PostgreSQL 16 Docker image pre-seeded with Pokémon data from [veekun/pokedex]
 docker compose up --build
 ```
 
-The first run downloads CSVs from GitHub and loads them into PostgreSQL. This takes a minute or two.
+> **Note:** The first `docker build` seeds all Pokémon data and sprites into the image — this takes several minutes. Subsequent starts are **instant** since the data is baked in.
 
-> **Note:** The default credentials (`ash` / `pikachu`) are for local development only.
-> For any other environment, override them with environment variables:
-> ```bash
-> POSTGRES_USER=myuser POSTGRES_PASSWORD=mysecretpassword docker compose up --build
-> ```
+The default credentials (`ash` / `pikachu`) are for local development only.
 
 ---
 
@@ -34,26 +34,48 @@ The first run downloads CSVs from GitHub and loads them into PostgreSQL. This ta
 docker exec -it pokedex-db psql -U ash -d pokedex
 ```
 
+> To upgrade to a new image version, wipe the volume first so the new data is used:
+> ```bash
+> docker compose down -v && docker compose up --build
+> ```
+
 ---
 
 ## Schema
 
-| Table              | Description                              |
-|--------------------|------------------------------------------|
-| `generations`      | Game generations (I–IX)                  |
-| `types`            | Pokémon types (Fire, Water, etc.)        |
-| `pokemon_species`  | Species-level data (legendary, color…)   |
-| `pokemon`          | Individual Pokémon forms                 |
-| `pokemon_stats`    | Base stats (HP, ATK, DEF, …)             |
-| `pokemon_types`    | Type slot assignments per Pokémon        |
-| `abilities`        | All abilities                            |
-| `pokemon_abilities`| Ability assignments per Pokémon          |
-| `moves`            | All moves with power/pp/accuracy         |
+| Table               | Description                              |
+|---------------------|------------------------------------------|
+| `generations`       | Game generations (I–IX)                  |
+| `types`             | Pokémon types (Fire, Water, etc.)        |
+| `pokemon_species`   | Species-level data (legendary, color…)   |
+| `pokemon`           | Individual Pokémon forms                 |
+| `pokemon_stats`     | Base stats (HP, ATK, DEF, …)             |
+| `pokemon_types`     | Type slot assignments per Pokémon        |
+| `abilities`         | All abilities                            |
+| `pokemon_abilities` | Ability assignments per Pokémon          |
+| `moves`             | All moves with power/pp/accuracy         |
+| `pokemon_sprites`   | Front/back/shiny sprites (BYTEA) + official artwork URL |
 
 ### View: `pokemon_overview`
 
 Joins all tables into a single flat view:
-`id, name, color, is_legendary, is_mythical, type1, type2, hp, attack, defense, sp_attack, sp_defense, speed, base_stat_total`
+`id, name, color, is_legendary, is_mythical, type1, type2, hp, attack, defense, sp_attack, sp_defense, speed, base_stat_total, front_default, official_artwork_url`
+
+---
+
+## Sprites
+
+Sprites are stored in the `pokemon_sprites` table:
+
+| Column                | Type    | Description                                      |
+|-----------------------|---------|--------------------------------------------------|
+| `pokemon_id`          | INTEGER | FK to `pokemon`                                  |
+| `front_default`       | BYTEA   | Front-facing sprite (~1–8 KB PNG)                |
+| `front_shiny`         | BYTEA   | Shiny front-facing sprite                        |
+| `back_default`        | BYTEA   | Back-facing sprite                               |
+| `official_artwork_url`| TEXT    | URL to high-res official artwork (~126 KB each)  |
+
+Regular sprites are stored as binary directly in the database (~6 MB total). Official artwork is stored as a URL.
 
 ---
 
@@ -81,21 +103,17 @@ FROM pokemon_overview
 WHERE type1 IS NOT NULL
 GROUP BY type1
 ORDER BY avg_bst DESC;
+
+-- Retrieve a sprite as base64 (e.g. for embedding in HTML/apps)
+SELECT pokemon_id, encode(front_default, 'base64') AS front_sprite
+FROM pokemon_sprites
+WHERE pokemon_id = 25;
+
+-- Get Pikachu's official artwork URL
+SELECT name, official_artwork_url
+FROM pokemon_overview
+WHERE name = 'pikachu';
 ```
-
----
-
-## GitHub Actions secrets
-
-To publish the image to Docker Hub, add these secrets in
-**GitHub → Settings → Secrets and variables → Actions**:
-
-| Secret              | Value                                            |
-|---------------------|--------------------------------------------------|
-| `DOCKERHUB_USERNAME`| Your Docker Hub username                         |
-| `DOCKERHUB_TOKEN`   | Personal access token from hub.docker.com → Security |
-
-The workflow builds for `linux/amd64` and `linux/arm64` and pushes on every commit to `main` or a semver tag.
 
 ---
 
@@ -108,10 +126,15 @@ docker compose down -v && docker compose up --build
 # Test the view
 docker exec -it pokedex-db psql -U ash -d pokedex -c \
   "SELECT name, type1, type2, base_stat_total FROM pokemon_overview ORDER BY base_stat_total DESC LIMIT 10;"
+
+# Check sprite coverage
+docker exec -it pokedex-db psql -U ash -d pokedex -c \
+  "SELECT COUNT(*) FROM pokemon_sprites WHERE front_default IS NOT NULL;"
 ```
 
 ---
 
-## Data source
+## Data sources
 
-Pokémon data sourced from [veekun/pokedex](https://github.com/veekun/pokedex) — CSV files under the [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/) licence.
+- Pokémon data: [veekun/pokedex](https://github.com/veekun/pokedex) — [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- Sprites: [PokeAPI/sprites](https://github.com/PokeAPI/sprites) — [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
