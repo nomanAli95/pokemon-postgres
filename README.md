@@ -14,7 +14,7 @@ A PostgreSQL 16 Docker image pre-seeded with a complete Pokédex: data from [Pok
 docker compose up --build
 ```
 
-> **Note:** The first `docker build` seeds all 923 Pokémon (Gen 1–9) with data and sprites into the image — this takes several minutes. Subsequent starts are **instant** since the data is baked in.
+> **Note:** The first `docker build` seeds all 1025 Pokémon species (Gen 1–9, 1350 total forms) with data and sprites into the image — this takes several minutes. Subsequent starts are **instant** since the data is baked in.
 
 The default credentials (`ash` / `pikachu`) are for local development only.
 
@@ -43,18 +43,25 @@ docker exec -it pokedex-db psql -U ash -d pokedex
 
 ## Schema
 
-| Table               | Description                              |
-|---------------------|------------------------------------------|
-| `generations`       | Game generations (I–IX)                  |
-| `types`             | Pokémon types (Fire, Water, etc.)        |
-| `pokemon_species`   | Species-level data (legendary, color…)   |
-| `pokemon`           | Individual Pokémon forms                 |
-| `pokemon_stats`     | Base stats (HP, ATK, DEF, …)             |
-| `pokemon_types`     | Type slot assignments per Pokémon        |
-| `abilities`         | All abilities                            |
-| `pokemon_abilities` | Ability assignments per Pokémon          |
-| `moves`             | All moves with power/pp/accuracy         |
-| `pokemon_sprites`   | Front/back/shiny sprites (BYTEA) + official artwork URL |
+| Table                  | Description                                                      |
+|------------------------|------------------------------------------------------------------|
+| `generations`          | Game generations (I–IX)                                          |
+| `types`                | Pokémon types (Fire, Water, etc.)                                |
+| `pokemon_species`      | Species-level data (legendary, color, genus…)                    |
+| `pokemon`              | Individual Pokémon forms                                         |
+| `pokemon_stats`        | Base stats and EV yields (HP, ATK, DEF, …)                       |
+| `pokemon_types`        | Type slot assignments per Pokémon                                |
+| `abilities`            | All abilities                                                    |
+| `pokemon_abilities`    | Ability assignments per Pokémon                                  |
+| `moves`                | All moves with power/pp/accuracy/damage class and English name   |
+| `pokemon_sprites`      | Front/back/shiny sprites (BYTEA) + official artwork URL          |
+| `egg_groups`           | Egg group definitions (15 groups)                                |
+| `pokemon_egg_groups`   | Egg group assignments per species (1–2 per species)              |
+| `type_efficacy`        | 18×18 type matchup matrix (damage factors: 0/50/100/200)         |
+| `ability_prose`        | English short-effect description per ability                     |
+| `pokemon_flavor_text`  | English Pokédex entry text per species per game version          |
+| `pokemon_evolution`    | Evolution conditions (level, item, happiness, trade, etc.)       |
+| `pokemon_moves`        | Moves each Pokémon can learn, per version group and learn method  |
 
 ### View: `pokemon_overview`
 
@@ -64,7 +71,7 @@ Joins all tables into a single flat view with every one-to-one field available f
 |--------|--------|-------------|
 | `id`, `name` | `pokemon` | Pokédex number and identifier |
 | `height`, `weight`, `base_experience` | `pokemon` | Physical data and base XP |
-| `color`, `shape`, `habitat` | `pokemon_species` | Visual and ecological traits |
+| `color`, `shape`, `habitat`, `genus` | `pokemon_species` | Visual, ecological traits and genus (e.g. "Seed Pokémon") |
 | `gender_rate`, `capture_rate`, `base_happiness` | `pokemon_species` | Game mechanics |
 | `is_baby`, `hatch_counter`, `growth_rate` | `pokemon_species` | Breeding data |
 | `is_legendary`, `is_mythical` | `pokemon_species` | Rarity flags |
@@ -75,7 +82,7 @@ Joins all tables into a single flat view with every one-to-one field available f
 | `ev_hp`, `ev_attack`, `ev_defense`, `ev_sp_attack`, `ev_sp_defense`, `ev_speed` | `pokemon_stats` | EV yields |
 | `front_default`, `official_artwork_url` | `pokemon_sprites` | Sprite blob and artwork URL |
 
-> **One-to-many data** (abilities, full evolution chain) is not in the view — query `pokemon_abilities`, `abilities`, and `pokemon_species` directly using `evolution_chain_id`.
+> **One-to-many data** (abilities, moves, egg groups, flavor text, evolution chain, type efficacy) is not in the view — query the dedicated tables directly.
 
 ---
 
@@ -104,57 +111,19 @@ FROM pokemon_overview
 ORDER BY base_stat_total DESC
 LIMIT 10;
 
--- All legendary Fire-types
-SELECT name, type1, type2, hp, attack, speed
-FROM pokemon_overview
-WHERE is_legendary = TRUE
-  AND (type1 = 'fire' OR type2 = 'fire')
-ORDER BY base_stat_total DESC;
-
--- Average stats by primary type
-SELECT type1,
-       ROUND(AVG(base_stat_total)) AS avg_bst,
-       COUNT(*) AS count
-FROM pokemon_overview
-WHERE type1 IS NOT NULL
-GROUP BY type1
-ORDER BY avg_bst DESC;
-
--- Full card data for a single Pokémon (all flat fields)
-SELECT name, generation, region, type1, type2,
-       height, weight, base_experience,
-       habitat, color, shape, growth_rate,
-       capture_rate, base_happiness, gender_rate,
-       is_baby, is_legendary, is_mythical,
-       hp, attack, defense, sp_attack, sp_defense, speed, base_stat_total,
-       ev_hp, ev_attack, ev_defense, ev_sp_attack, ev_sp_defense, ev_speed,
-       evolves_from_species_id, evolution_chain_id,
-       official_artwork_url
+-- Full card data for a single Pokémon
+SELECT name, genus, generation, region, type1, type2,
+       height, weight, habitat, capture_rate,
+       hp, attack, defense, sp_attack, sp_defense, speed
 FROM pokemon_overview
 WHERE name = 'bulbasaur';
 
--- Full evolution chain (use evolution_chain_id from pokemon_overview)
-SELECT ps.id, ps.identifier, ps.evolves_from_species_id
-FROM pokemon_species ps
-WHERE ps.evolution_chain_id = 1
-ORDER BY ps.sort_order;
-
--- Abilities for a Pokémon (one-to-many, not in the view)
-SELECT a.identifier AS ability, pa.is_hidden
-FROM pokemon_abilities pa
-JOIN abilities a ON a.id = pa.ability_id
-WHERE pa.pokemon_id = 1
-ORDER BY pa.slot;
-
--- Retrieve a sprite as base64 (e.g. for embedding in HTML/apps)
-SELECT pokemon_id, encode(front_default, 'base64') AS front_sprite
-FROM pokemon_sprites
-WHERE pokemon_id = 25;
-
--- Get Pikachu's official artwork URL
-SELECT name, official_artwork_url
-FROM pokemon_overview
-WHERE name = 'pikachu';
+-- Moves learnable in a specific game (version_group_id = 25 is Scarlet/Violet, 1 is Red/Blue)
+SELECT m.name, m.damage_class, m.power, m.pp, pm.learn_method, pm.level
+FROM pokemon_moves pm
+JOIN moves m ON m.id = pm.move_id
+WHERE pm.pokemon_id = 1 AND pm.version_group_id = 25
+ORDER BY pm.learn_method, pm.level;
 ```
 
 ---
@@ -167,7 +136,7 @@ docker compose down -v && docker compose up --build
 
 # Test the view
 docker exec -it pokedex-db psql -U ash -d pokedex -c \
-  "SELECT name, generation, region, type1, type2, base_stat_total FROM pokemon_overview ORDER BY base_stat_total DESC LIMIT 10;"
+  "SELECT name, type1, type2, base_stat_total FROM pokemon_overview ORDER BY base_stat_total DESC LIMIT 10;"
 
 # Check sprite coverage
 docker exec -it pokedex-db psql -U ash -d pokedex -c \

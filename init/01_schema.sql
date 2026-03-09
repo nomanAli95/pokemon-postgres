@@ -34,7 +34,8 @@ CREATE TABLE pokemon_species (
     is_legendary             BOOLEAN NOT NULL DEFAULT FALSE,
     is_mythical              BOOLEAN NOT NULL DEFAULT FALSE,
     sort_order               INTEGER,
-    conquest_order           INTEGER
+    conquest_order           INTEGER,
+    genus                    TEXT
 );
 
 -- 4. pokemon
@@ -87,6 +88,7 @@ CREATE TABLE pokemon_abilities (
 CREATE TABLE moves (
     id                      INTEGER PRIMARY KEY,
     identifier              TEXT NOT NULL,
+    name                    TEXT,
     generation_id           INTEGER REFERENCES generations(id),
     type_id                 INTEGER REFERENCES types(id),
     power                   INTEGER,
@@ -111,6 +113,70 @@ CREATE TABLE pokemon_sprites (
     official_artwork_url TEXT
 );
 
+-- 11. egg_groups
+CREATE TABLE egg_groups (
+    id         INTEGER PRIMARY KEY,
+    identifier TEXT NOT NULL
+);
+
+-- 12. pokemon_egg_groups
+CREATE TABLE pokemon_egg_groups (
+    species_id   INTEGER REFERENCES pokemon_species(id),
+    egg_group_id INTEGER REFERENCES egg_groups(id),
+    PRIMARY KEY (species_id, egg_group_id)
+);
+
+-- 13. type_efficacy
+CREATE TABLE type_efficacy (
+    damage_type_id INTEGER REFERENCES types(id),
+    target_type_id INTEGER REFERENCES types(id),
+    damage_factor  INTEGER NOT NULL,
+    PRIMARY KEY (damage_type_id, target_type_id)
+);
+
+-- 14. ability_prose (English, one row per ability)
+CREATE TABLE ability_prose (
+    ability_id   INTEGER PRIMARY KEY REFERENCES abilities(id),
+    short_effect TEXT
+);
+
+-- 15. pokemon_flavor_text (English Pokédex entries)
+CREATE TABLE pokemon_flavor_text (
+    species_id  INTEGER REFERENCES pokemon_species(id),
+    version_id  INTEGER NOT NULL,
+    flavor_text TEXT NOT NULL,
+    PRIMARY KEY (species_id, version_id)
+);
+
+-- 16. pokemon_evolution
+CREATE TABLE pokemon_evolution (
+    id                      INTEGER PRIMARY KEY,
+    evolved_species_id      INTEGER REFERENCES pokemon_species(id),
+    evolution_trigger       TEXT,
+    minimum_level           INTEGER,
+    trigger_item            TEXT,
+    held_item               TEXT,
+    time_of_day             TEXT,
+    minimum_happiness       INTEGER,
+    minimum_beauty          INTEGER,
+    minimum_affection       INTEGER,
+    known_move_id           INTEGER REFERENCES moves(id),
+    trade_species_id        INTEGER REFERENCES pokemon_species(id),
+    relative_physical_stats INTEGER,
+    needs_overworld_rain    BOOLEAN NOT NULL DEFAULT FALSE,
+    turn_upside_down        BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+-- 17. pokemon_moves
+CREATE TABLE pokemon_moves (
+    pokemon_id       INTEGER REFERENCES pokemon(id),
+    version_group_id INTEGER NOT NULL,
+    move_id          INTEGER REFERENCES moves(id),
+    learn_method     TEXT NOT NULL,
+    level            INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (pokemon_id, version_group_id, move_id, learn_method)
+);
+
 -- View: pokemon_overview
 CREATE VIEW pokemon_overview AS
 SELECT
@@ -124,6 +190,7 @@ SELECT
     ps.color,
     ps.shape,
     ps.habitat,
+    ps.genus,
     ps.gender_rate,
     ps.capture_rate,
     ps.base_happiness,
@@ -174,7 +241,7 @@ LEFT JOIN pokemon_stats pst     ON pst.pokemon_id = p.id
 LEFT JOIN pokemon_sprites spr   ON spr.pokemon_id = p.id
 GROUP BY
     p.id, p.identifier, p.height, p.weight, p.base_experience,
-    ps.color, ps.shape, ps.habitat, ps.gender_rate, ps.capture_rate,
+    ps.color, ps.shape, ps.habitat, ps.genus, ps.gender_rate, ps.capture_rate,
     ps.base_happiness, ps.is_baby, ps.hatch_counter, ps.growth_rate,
     ps.is_legendary, ps.is_mythical, ps.evolves_from_species_id, ps.evolution_chain_id,
     g.identifier, g.main_region,

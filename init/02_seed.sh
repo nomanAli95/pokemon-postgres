@@ -135,6 +135,25 @@ LEFT JOIN tmp_growth_rates     gr ON gr.id = s.growth_rate_id
 ON CONFLICT DO NOTHING;
 SQL
 
+# ---------- genus (English) ----------
+csv=$(download pokemon_species_names)
+psql_as_ash <<SQL
+CREATE TEMP TABLE tmp_species_names (
+    pokemon_species_id INTEGER,
+    local_language_id  INTEGER,
+    name               TEXT,
+    genus              TEXT
+);
+\COPY tmp_species_names FROM '$csv' CSV HEADER;
+UPDATE pokemon_species ps
+SET genus = n.genus
+FROM tmp_species_names n
+WHERE n.pokemon_species_id = ps.id
+  AND n.local_language_id = 9
+  AND n.genus IS NOT NULL
+  AND n.genus != '';
+SQL
+
 # ---------- pokemon ----------
 csv=$(download pokemon)
 psql_as_ash <<SQL
@@ -268,5 +287,220 @@ LEFT JOIN tmp_move_targets mt ON mt.id = m.target_id
 ON CONFLICT DO NOTHING;
 SQL
 
+# ---------- move names (English) ----------
+csv=$(download move_names)
+psql_as_ash <<SQL
+CREATE TEMP TABLE tmp_move_names (
+    move_id           INTEGER,
+    local_language_id INTEGER,
+    name              TEXT
+);
+\COPY tmp_move_names FROM '$csv' CSV HEADER;
+UPDATE moves m
+SET name = mn.name
+FROM tmp_move_names mn
+WHERE mn.move_id = m.id
+  AND mn.local_language_id = 9;
+SQL
+
+# ---------- egg_groups ----------
+csv=$(download egg_groups)
+psql_as_ash <<SQL
+CREATE TEMP TABLE tmp_egg_groups (id INTEGER, identifier TEXT);
+\COPY tmp_egg_groups FROM '$csv' CSV HEADER;
+INSERT INTO egg_groups (id, identifier)
+SELECT id, identifier FROM tmp_egg_groups
+ON CONFLICT DO NOTHING;
+SQL
+
+# ---------- pokemon_egg_groups ----------
+csv=$(download pokemon_egg_groups)
+psql_as_ash <<SQL
+CREATE TEMP TABLE tmp_pokemon_egg_groups (species_id INTEGER, egg_group_id INTEGER);
+\COPY tmp_pokemon_egg_groups FROM '$csv' CSV HEADER;
+INSERT INTO pokemon_egg_groups (species_id, egg_group_id)
+SELECT species_id, egg_group_id FROM tmp_pokemon_egg_groups
+WHERE species_id IN (SELECT id FROM pokemon_species)
+ON CONFLICT DO NOTHING;
+SQL
+
+# ---------- type_efficacy ----------
+csv=$(download type_efficacy)
+psql_as_ash <<SQL
+CREATE TEMP TABLE tmp_type_efficacy (
+    damage_type_id INTEGER,
+    target_type_id INTEGER,
+    damage_factor  INTEGER
+);
+\COPY tmp_type_efficacy FROM '$csv' CSV HEADER;
+INSERT INTO type_efficacy (damage_type_id, target_type_id, damage_factor)
+SELECT damage_type_id, target_type_id, damage_factor
+FROM tmp_type_efficacy
+WHERE damage_type_id IN (SELECT id FROM types)
+  AND target_type_id IN (SELECT id FROM types)
+ON CONFLICT DO NOTHING;
+SQL
+
+# ---------- ability_prose (English) ----------
+csv=$(download ability_prose)
+psql_as_ash <<SQL
+CREATE TEMP TABLE tmp_ability_prose (
+    ability_id        INTEGER,
+    local_language_id INTEGER,
+    short_effect      TEXT,
+    effect            TEXT
+);
+\COPY tmp_ability_prose FROM '$csv' CSV HEADER;
+INSERT INTO ability_prose (ability_id, short_effect)
+SELECT ability_id, short_effect
+FROM tmp_ability_prose
+WHERE local_language_id = 9
+  AND ability_id IN (SELECT id FROM abilities)
+ON CONFLICT DO NOTHING;
+SQL
+
+# ---------- pokemon_flavor_text (English) ----------
+csv=$(download pokemon_species_flavor_text)
+# Re-encode through Python's csv module to fix any unterminated-quoted-field issues
+csv_fixed="/tmp/pokemon_species_flavor_text_fixed.csv"
+python3 - <<'PYEOF'
+import csv
+with open('/tmp/pokemon_species_flavor_text.csv', newline='', encoding='utf-8') as fin, \
+     open('/tmp/pokemon_species_flavor_text_fixed.csv', 'w', newline='', encoding='utf-8') as fout:
+    reader = csv.reader(fin)
+    writer = csv.writer(fout, quoting=csv.QUOTE_ALL)
+    for row in reader:
+        writer.writerow(row)
+PYEOF
+psql_as_ash <<SQL
+CREATE TEMP TABLE tmp_flavor_text (
+    species_id  INTEGER,
+    version_id  INTEGER,
+    language_id INTEGER,
+    flavor_text TEXT
+);
+\COPY tmp_flavor_text FROM '$csv_fixed' CSV HEADER;
+INSERT INTO pokemon_flavor_text (species_id, version_id, flavor_text)
+SELECT
+    species_id,
+    version_id,
+    regexp_replace(flavor_text, E'[\\x0c\\x0d\\x0a]+', ' ', 'g')
+FROM tmp_flavor_text
+WHERE language_id = 9
+  AND species_id IN (SELECT id FROM pokemon_species)
+ON CONFLICT DO NOTHING;
+SQL
+
+# ---------- pokemon_evolution ----------
+csv=$(download pokemon_evolution)
+# Strip any extra columns added in newer PokeAPI CSV versions (keep first 20)
+csv_fixed="/tmp/pokemon_evolution_fixed.csv"
+python3 - <<'PYEOF'
+import csv
+with open('/tmp/pokemon_evolution.csv', newline='', encoding='utf-8') as fin, \
+     open('/tmp/pokemon_evolution_fixed.csv', 'w', newline='', encoding='utf-8') as fout:
+    reader = csv.reader(fin)
+    writer = csv.writer(fout)
+    for row in reader:
+        writer.writerow(row[:20])
+PYEOF
+csv="$csv_fixed"
+csv_triggers=$(download evolution_triggers)
+csv_items=$(download items)
+psql_as_ash <<SQL
+CREATE TEMP TABLE tmp_pokemon_evolution (
+    id                      INTEGER,
+    evolved_species_id      INTEGER,
+    evolution_trigger_id    INTEGER,
+    trigger_item_id         TEXT,
+    minimum_level           TEXT,
+    gender_id               TEXT,
+    location_id             TEXT,
+    held_item_id            TEXT,
+    time_of_day             TEXT,
+    known_move_id           TEXT,
+    known_move_type_id      TEXT,
+    minimum_happiness       TEXT,
+    minimum_beauty          TEXT,
+    minimum_affection       TEXT,
+    relative_physical_stats TEXT,
+    party_species_id        TEXT,
+    party_type_id           TEXT,
+    trade_species_id        TEXT,
+    needs_overworld_rain    INTEGER,
+    turn_upside_down        INTEGER
+);
+CREATE TEMP TABLE tmp_evolution_triggers (id INTEGER, identifier TEXT);
+CREATE TEMP TABLE tmp_items (
+    id             INTEGER,
+    identifier     TEXT,
+    category_id    TEXT,
+    cost           TEXT,
+    fling_power    TEXT,
+    fling_effect_id TEXT
+);
+\COPY tmp_pokemon_evolution  FROM '$csv'          CSV HEADER;
+\COPY tmp_evolution_triggers FROM '$csv_triggers' CSV HEADER;
+\COPY tmp_items              FROM '$csv_items'    CSV HEADER;
+INSERT INTO pokemon_evolution (
+    id, evolved_species_id, evolution_trigger,
+    minimum_level, trigger_item, held_item,
+    time_of_day, minimum_happiness, minimum_beauty, minimum_affection,
+    known_move_id, trade_species_id,
+    relative_physical_stats, needs_overworld_rain, turn_upside_down
+)
+SELECT
+    e.id,
+    e.evolved_species_id,
+    et.identifier,
+    NULLIF(e.minimum_level,'')::int,
+    ti.identifier,
+    hi.identifier,
+    NULLIF(e.time_of_day,''),
+    NULLIF(e.minimum_happiness,'')::int,
+    NULLIF(e.minimum_beauty,'')::int,
+    NULLIF(e.minimum_affection,'')::int,
+    NULLIF(e.known_move_id,'')::int,
+    NULLIF(e.trade_species_id,'')::int,
+    NULLIF(e.relative_physical_stats,'')::int,
+    e.needs_overworld_rain::boolean,
+    e.turn_upside_down::boolean
+FROM tmp_pokemon_evolution e
+LEFT JOIN tmp_evolution_triggers et ON et.id = e.evolution_trigger_id
+LEFT JOIN tmp_items ti ON ti.id = NULLIF(e.trigger_item_id,'')::int
+LEFT JOIN tmp_items hi ON hi.id = NULLIF(e.held_item_id,'')::int
+ON CONFLICT DO NOTHING;
+SQL
+
+# ---------- pokemon_moves ----------
+csv=$(download pokemon_moves)
+csv_methods=$(download pokemon_move_methods)
+psql_as_ash <<SQL
+CREATE TEMP TABLE tmp_pokemon_moves (
+    pokemon_id             INTEGER,
+    version_group_id       INTEGER,
+    move_id                INTEGER,
+    pokemon_move_method_id INTEGER,
+    level                  INTEGER,
+    sort_order             TEXT,
+    mastery                TEXT
+);
+CREATE TEMP TABLE tmp_move_methods (id INTEGER, identifier TEXT);
+\COPY tmp_pokemon_moves FROM '$csv'         CSV HEADER;
+\COPY tmp_move_methods  FROM '$csv_methods' CSV HEADER;
+INSERT INTO pokemon_moves (pokemon_id, version_group_id, move_id, learn_method, level)
+SELECT
+    pm.pokemon_id,
+    pm.version_group_id,
+    pm.move_id,
+    mm.identifier,
+    COALESCE(pm.level, 0)
+FROM tmp_pokemon_moves pm
+JOIN tmp_move_methods mm ON mm.id = pm.pokemon_move_method_id
+WHERE pm.pokemon_id IN (SELECT id FROM pokemon)
+  AND pm.move_id    IN (SELECT id FROM moves)
+ON CONFLICT DO NOTHING;
+SQL
+
 echo ""
-echo "==> Done! Try: SELECT * FROM pokemon_overview LIMIT 10;"
+echo "==> Done! Try: SELECT name, genus, generation, region FROM pokemon_overview LIMIT 10;"
