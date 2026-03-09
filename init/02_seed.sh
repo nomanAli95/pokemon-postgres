@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-BASE_URL="https://raw.githubusercontent.com/veekun/pokedex/master/pokedex/data/csv"
+BASE_URL="https://raw.githubusercontent.com/PokeAPI/pokeapi/master/data/v2/csv"
 
 download() {
     local name="$1"

@@ -1,6 +1,6 @@
 # pokemon-postgres
 
-A PostgreSQL 16 Docker image pre-seeded with a complete Pokédex: data from [veekun/pokedex](https://github.com/veekun/pokedex) and sprites from [PokeAPI/sprites](https://github.com/PokeAPI/sprites).
+A PostgreSQL 16 Docker image pre-seeded with a complete Pokédex: data from [PokeAPI/pokeapi](https://github.com/PokeAPI/pokeapi) and sprites from [PokeAPI/sprites](https://github.com/PokeAPI/sprites).
 
 | Bulbasaur | Charmander | Squirtle |
 |:---------:|:----------:|:--------:|
@@ -14,7 +14,7 @@ A PostgreSQL 16 Docker image pre-seeded with a complete Pokédex: data from [vee
 docker compose up --build
 ```
 
-> **Note:** The first `docker build` seeds all Pokémon data and sprites into the image — this takes several minutes. Subsequent starts are **instant** since the data is baked in.
+> **Note:** The first `docker build` seeds all 923 Pokémon (Gen 1–9) with data and sprites into the image — this takes several minutes. Subsequent starts are **instant** since the data is baked in.
 
 The default credentials (`ash` / `pikachu`) are for local development only.
 
@@ -136,5 +136,5 @@ docker exec -it pokedex-db psql -U ash -d pokedex -c \
 
 ## Data sources
 
-- Pokémon data: [veekun/pokedex](https://github.com/veekun/pokedex) — [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- Pokémon data: [PokeAPI/pokeapi](https://github.com/PokeAPI/pokeapi) — [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
 - Sprites: [PokeAPI/sprites](https://github.com/PokeAPI/sprites) — [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
