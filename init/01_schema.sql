@@ -115,28 +115,68 @@ CREATE TABLE pokemon_sprites (
 CREATE VIEW pokemon_overview AS
 SELECT
     p.id,
-    p.identifier                                        AS name,
+    p.identifier                                            AS name,
+    p.height,
+    p.weight,
+    p.base_experience,
+
+    -- species
     ps.color,
+    ps.shape,
+    ps.habitat,
+    ps.gender_rate,
+    ps.capture_rate,
+    ps.base_happiness,
+    ps.is_baby,
+    ps.hatch_counter,
+    ps.growth_rate,
     ps.is_legendary,
     ps.is_mythical,
-    t1.identifier                                       AS type1,
-    t2.identifier                                       AS type2,
-    MAX(CASE WHEN pst.stat_id = 1 THEN pst.base_stat END) AS hp,
-    MAX(CASE WHEN pst.stat_id = 2 THEN pst.base_stat END) AS attack,
-    MAX(CASE WHEN pst.stat_id = 3 THEN pst.base_stat END) AS defense,
-    MAX(CASE WHEN pst.stat_id = 4 THEN pst.base_stat END) AS sp_attack,
-    MAX(CASE WHEN pst.stat_id = 5 THEN pst.base_stat END) AS sp_defense,
-    MAX(CASE WHEN pst.stat_id = 6 THEN pst.base_stat END) AS speed,
-    SUM(pst.base_stat)                                  AS base_stat_total,
+    ps.evolves_from_species_id,
+    ps.evolution_chain_id,
+
+    -- generation & region
+    g.identifier                                            AS generation,
+    g.main_region                                           AS region,
+
+    -- types
+    t1.identifier                                           AS type1,
+    t2.identifier                                           AS type2,
+
+    -- base stats
+    MAX(CASE WHEN pst.stat_id = 1 THEN pst.base_stat END)  AS hp,
+    MAX(CASE WHEN pst.stat_id = 2 THEN pst.base_stat END)  AS attack,
+    MAX(CASE WHEN pst.stat_id = 3 THEN pst.base_stat END)  AS defense,
+    MAX(CASE WHEN pst.stat_id = 4 THEN pst.base_stat END)  AS sp_attack,
+    MAX(CASE WHEN pst.stat_id = 5 THEN pst.base_stat END)  AS sp_defense,
+    MAX(CASE WHEN pst.stat_id = 6 THEN pst.base_stat END)  AS speed,
+    SUM(pst.base_stat)                                      AS base_stat_total,
+
+    -- ev yields
+    MAX(CASE WHEN pst.stat_id = 1 THEN pst.effort END)     AS ev_hp,
+    MAX(CASE WHEN pst.stat_id = 2 THEN pst.effort END)     AS ev_attack,
+    MAX(CASE WHEN pst.stat_id = 3 THEN pst.effort END)     AS ev_defense,
+    MAX(CASE WHEN pst.stat_id = 4 THEN pst.effort END)     AS ev_sp_attack,
+    MAX(CASE WHEN pst.stat_id = 5 THEN pst.effort END)     AS ev_sp_defense,
+    MAX(CASE WHEN pst.stat_id = 6 THEN pst.effort END)     AS ev_speed,
+
+    -- sprites
     spr.front_default,
     spr.official_artwork_url
 FROM pokemon p
-JOIN pokemon_species ps       ON ps.id = p.species_id
-LEFT JOIN pokemon_types pt1   ON pt1.pokemon_id = p.id AND pt1.slot = 1
-LEFT JOIN types t1            ON t1.id = pt1.type_id
-LEFT JOIN pokemon_types pt2   ON pt2.pokemon_id = p.id AND pt2.slot = 2
-LEFT JOIN types t2            ON t2.id = pt2.type_id
-LEFT JOIN pokemon_stats pst   ON pst.pokemon_id = p.id
-LEFT JOIN pokemon_sprites spr ON spr.pokemon_id = p.id
-GROUP BY p.id, p.identifier, ps.color, ps.is_legendary, ps.is_mythical,
-         t1.identifier, t2.identifier, spr.front_default, spr.official_artwork_url;
+JOIN pokemon_species ps         ON ps.id = p.species_id
+LEFT JOIN generations g         ON g.id = ps.generation_id
+LEFT JOIN pokemon_types pt1     ON pt1.pokemon_id = p.id AND pt1.slot = 1
+LEFT JOIN types t1              ON t1.id = pt1.type_id
+LEFT JOIN pokemon_types pt2     ON pt2.pokemon_id = p.id AND pt2.slot = 2
+LEFT JOIN types t2              ON t2.id = pt2.type_id
+LEFT JOIN pokemon_stats pst     ON pst.pokemon_id = p.id
+LEFT JOIN pokemon_sprites spr   ON spr.pokemon_id = p.id
+GROUP BY
+    p.id, p.identifier, p.height, p.weight, p.base_experience,
+    ps.color, ps.shape, ps.habitat, ps.gender_rate, ps.capture_rate,
+    ps.base_happiness, ps.is_baby, ps.hatch_counter, ps.growth_rate,
+    ps.is_legendary, ps.is_mythical, ps.evolves_from_species_id, ps.evolution_chain_id,
+    g.identifier, g.main_region,
+    t1.identifier, t2.identifier,
+    spr.front_default, spr.official_artwork_url;

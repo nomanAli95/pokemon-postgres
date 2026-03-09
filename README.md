@@ -58,8 +58,24 @@ docker exec -it pokedex-db psql -U ash -d pokedex
 
 ### View: `pokemon_overview`
 
-Joins all tables into a single flat view:
-`id, name, color, is_legendary, is_mythical, type1, type2, hp, attack, defense, sp_attack, sp_defense, speed, base_stat_total, front_default, official_artwork_url`
+Joins all tables into a single flat view with every one-to-one field available for a Pokémon:
+
+| Column | Source | Description |
+|--------|--------|-------------|
+| `id`, `name` | `pokemon` | Pokédex number and identifier |
+| `height`, `weight`, `base_experience` | `pokemon` | Physical data and base XP |
+| `color`, `shape`, `habitat` | `pokemon_species` | Visual and ecological traits |
+| `gender_rate`, `capture_rate`, `base_happiness` | `pokemon_species` | Game mechanics |
+| `is_baby`, `hatch_counter`, `growth_rate` | `pokemon_species` | Breeding data |
+| `is_legendary`, `is_mythical` | `pokemon_species` | Rarity flags |
+| `evolves_from_species_id`, `evolution_chain_id` | `pokemon_species` | Evolution references |
+| `generation`, `region` | `generations` | Generation name and main region |
+| `type1`, `type2` | `types` | Primary and secondary type |
+| `hp`, `attack`, `defense`, `sp_attack`, `sp_defense`, `speed`, `base_stat_total` | `pokemon_stats` | Base stats |
+| `ev_hp`, `ev_attack`, `ev_defense`, `ev_sp_attack`, `ev_sp_defense`, `ev_speed` | `pokemon_stats` | EV yields |
+| `front_default`, `official_artwork_url` | `pokemon_sprites` | Sprite blob and artwork URL |
+
+> **One-to-many data** (abilities, full evolution chain) is not in the view — query `pokemon_abilities`, `abilities`, and `pokemon_species` directly using `evolution_chain_id`.
 
 ---
 
@@ -104,6 +120,32 @@ WHERE type1 IS NOT NULL
 GROUP BY type1
 ORDER BY avg_bst DESC;
 
+-- Full card data for a single Pokémon (all flat fields)
+SELECT name, generation, region, type1, type2,
+       height, weight, base_experience,
+       habitat, color, shape, growth_rate,
+       capture_rate, base_happiness, gender_rate,
+       is_baby, is_legendary, is_mythical,
+       hp, attack, defense, sp_attack, sp_defense, speed, base_stat_total,
+       ev_hp, ev_attack, ev_defense, ev_sp_attack, ev_sp_defense, ev_speed,
+       evolves_from_species_id, evolution_chain_id,
+       official_artwork_url
+FROM pokemon_overview
+WHERE name = 'bulbasaur';
+
+-- Full evolution chain (use evolution_chain_id from pokemon_overview)
+SELECT ps.id, ps.identifier, ps.evolves_from_species_id
+FROM pokemon_species ps
+WHERE ps.evolution_chain_id = 1
+ORDER BY ps.sort_order;
+
+-- Abilities for a Pokémon (one-to-many, not in the view)
+SELECT a.identifier AS ability, pa.is_hidden
+FROM pokemon_abilities pa
+JOIN abilities a ON a.id = pa.ability_id
+WHERE pa.pokemon_id = 1
+ORDER BY pa.slot;
+
 -- Retrieve a sprite as base64 (e.g. for embedding in HTML/apps)
 SELECT pokemon_id, encode(front_default, 'base64') AS front_sprite
 FROM pokemon_sprites
@@ -125,7 +167,7 @@ docker compose down -v && docker compose up --build
 
 # Test the view
 docker exec -it pokedex-db psql -U ash -d pokedex -c \
-  "SELECT name, type1, type2, base_stat_total FROM pokemon_overview ORDER BY base_stat_total DESC LIMIT 10;"
+  "SELECT name, generation, region, type1, type2, base_stat_total FROM pokemon_overview ORDER BY base_stat_total DESC LIMIT 10;"
 
 # Check sprite coverage
 docker exec -it pokedex-db psql -U ash -d pokedex -c \
