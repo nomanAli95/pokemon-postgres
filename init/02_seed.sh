@@ -3,17 +3,36 @@ set -e
 
 BASE_URL="https://raw.githubusercontent.com/PokeAPI/pokeapi/master/data/v2/csv"
 
-download() {
-    local name="$1"
-    local dest="/tmp/${name}.csv"
-    echo "--> Downloading ${name}.csv" >&2
-    curl -fsSL "${BASE_URL}/${name}.csv" -o "$dest" >&2
-    echo "$dest"
-}
-
 psql_as_ash() {
     psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-ash}" -d "${POSTGRES_DB:-pokedex}" "$@"
 }
+
+# Download all CSVs in parallel upfront
+echo "--> Downloading all CSV files in parallel..." >&2
+_pids=()
+for _name in \
+    generations regions types \
+    pokemon_species pokemon_colors pokemon_shapes pokemon_habitats growth_rates \
+    pokemon_species_names \
+    pokemon pokemon_stats pokemon_types \
+    abilities pokemon_abilities \
+    moves move_targets move_names \
+    egg_groups pokemon_egg_groups \
+    type_efficacy \
+    ability_prose \
+    pokemon_species_flavor_text \
+    pokemon_evolution evolution_triggers items \
+    pokemon_moves pokemon_move_methods; do
+    curl -fsSL "${BASE_URL}/${_name}.csv" -o "/tmp/${_name}.csv" &
+    _pids+=($!)
+done
+for _pid in "${_pids[@]}"; do
+    wait "$_pid"
+done
+echo "--> All CSV downloads complete." >&2
+
+# Return the pre-downloaded path (files already on disk)
+download() { echo "/tmp/${1}.csv"; }
 
 # ---------- generations ----------
 csv=$(download generations)

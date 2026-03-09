@@ -7,53 +7,82 @@ psql_as_ash() {
     psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-ash}" -d "${POSTGRES_DB:-pokedex}" "$@"
 }
 
-# Convert binary file to hex string using python3
-to_hex() {
-    python3 -c "
-import sys
-with open(sys.argv[1], 'rb') as f:
-    data = f.read()
-sys.stdout.write(data.hex())
-" "$1"
-}
-
 echo "--> Fetching Pokemon IDs from DB..." >&2
-IDS=$(psql_as_ash -t -A -c "SELECT id FROM pokemon ORDER BY id")
-TOTAL=$(echo "$IDS" | wc -w | tr -d ' ')
-echo "--> Downloading sprites for ${TOTAL} Pokemon (this may take a while)..." >&2
+psql_as_ash -t -A -c "SELECT id FROM pokemon ORDER BY id" > /tmp/pokemon_ids.txt
+TOTAL=$(wc -l < /tmp/pokemon_ids.txt | tr -d ' ')
+echo "--> Downloading sprites for ${TOTAL} Pokemon in parallel..." >&2
 
-SQL_FILE="/tmp/sprites_insert.sql"
-echo "BEGIN;" > "$SQL_FILE"
+SPRITE_BASE="$SPRITE_BASE" python3 << 'PYEOF'
+import os, sys, base64, subprocess, urllib.request, concurrent.futures
 
-COUNT=0
-for id in $IDS; do
-    COUNT=$((COUNT + 1))
-    echo "--> [${COUNT}/${TOTAL}] Pokemon #${id}" >&2
+sprite_base = os.environ['SPRITE_BASE']
+sprite_dir  = '/tmp/sprites'
+os.makedirs(sprite_dir, exist_ok=True)
 
-    rm -f /tmp/sp_front.png /tmp/sp_shiny.png /tmp/sp_back.png
+with open('/tmp/pokemon_ids.txt') as f:
+    ids = [line.strip() for line in f if line.strip()]
 
-    curl -fsSL "${SPRITE_BASE}/${id}.png"       -o /tmp/sp_front.png 2>/dev/null || true
-    curl -fsSL "${SPRITE_BASE}/shiny/${id}.png" -o /tmp/sp_shiny.png 2>/dev/null || true
-    curl -fsSL "${SPRITE_BASE}/back/${id}.png"  -o /tmp/sp_back.png  2>/dev/null || true
+def fetch(url, dest):
+    try:
+        urllib.request.urlretrieve(url, dest)
+        if os.path.getsize(dest) == 0:
+            os.remove(dest)
+    except Exception:
+        if os.path.exists(dest):
+            os.remove(dest)
 
-    front_hex=$([ -s /tmp/sp_front.png ] && to_hex /tmp/sp_front.png || echo "")
-    shiny_hex=$([ -s /tmp/sp_shiny.png ] && to_hex /tmp/sp_shiny.png || echo "")
-    back_hex=$([ -s /tmp/sp_back.png  ] && to_hex /tmp/sp_back.png  || echo "")
+def fetch_task(args):
+    fetch(*args)
 
-    front_val=$([ -n "$front_hex" ] && echo "decode('${front_hex}','hex')" || echo "NULL")
-    shiny_val=$([ -n "$shiny_hex" ] && echo "decode('${shiny_hex}','hex')" || echo "NULL")
-    back_val=$([ -n "$back_hex"  ] && echo "decode('${back_hex}','hex')"  || echo "NULL")
+tasks = []
+for pid in ids:
+    tasks.extend([
+        (f"{sprite_base}/{pid}.png",       f"{sprite_dir}/{pid}_front.png"),
+        (f"{sprite_base}/shiny/{pid}.png", f"{sprite_dir}/{pid}_shiny.png"),
+        (f"{sprite_base}/back/{pid}.png",  f"{sprite_dir}/{pid}_back.png"),
+    ])
 
-    artwork_url="${SPRITE_BASE}/other/official-artwork/${id}.png"
+print(f"--> Fetching {len(tasks)} sprites with 30 concurrent workers...", file=sys.stderr, flush=True)
+with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+    list(executor.map(fetch_task, tasks))
 
-    echo "INSERT INTO pokemon_sprites (pokemon_id, front_default, front_shiny, back_default, official_artwork_url) VALUES (${id}, ${front_val}, ${shiny_val}, ${back_val}, '${artwork_url}') ON CONFLICT DO NOTHING;" >> "$SQL_FILE"
-done
+print("--> Streaming SQL to psql...", file=sys.stderr, flush=True)
 
-echo "COMMIT;" >> "$SQL_FILE"
+def to_sql_val(path):
+    if os.path.exists(path):
+        b64 = base64.b64encode(open(path, 'rb').read()).decode()
+        return f"decode('{b64}','base64')"
+    return 'NULL'
 
-echo "--> Inserting sprites into database..." >&2
-psql_as_ash -f "$SQL_FILE"
-rm -f "$SQL_FILE" /tmp/sp_front.png /tmp/sp_shiny.png /tmp/sp_back.png
+psql_env = os.environ.copy()
+proc = subprocess.Popen(
+    ['psql', '-v', 'ON_ERROR_STOP=1',
+     '-U', os.environ.get('POSTGRES_USER', 'ash'),
+     '-d', os.environ.get('POSTGRES_DB', 'pokedex')],
+    stdin=subprocess.PIPE, text=True, env=psql_env
+)
+
+proc.stdin.write('BEGIN;\n')
+for pid in ids:
+    front_val   = to_sql_val(f"{sprite_dir}/{pid}_front.png")
+    shiny_val   = to_sql_val(f"{sprite_dir}/{pid}_shiny.png")
+    back_val    = to_sql_val(f"{sprite_dir}/{pid}_back.png")
+    artwork_url = f"{sprite_base}/other/official-artwork/{pid}.png"
+    proc.stdin.write(
+        f"INSERT INTO pokemon_sprites "
+        f"(pokemon_id, front_default, front_shiny, back_default, official_artwork_url) "
+        f"VALUES ({pid}, {front_val}, {shiny_val}, {back_val}, '{artwork_url}') "
+        f"ON CONFLICT DO NOTHING;\n"
+    )
+proc.stdin.write('COMMIT;\n')
+proc.stdin.close()
+
+rc = proc.wait()
+if rc != 0:
+    sys.exit(rc)
+PYEOF
+
+rm -rf /tmp/sprites /tmp/pokemon_ids.txt
 
 echo ""
 echo "==> Sprites done! Try: SELECT id, name, official_artwork_url FROM pokemon_overview LIMIT 5;"
