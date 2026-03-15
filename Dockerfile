@@ -1,4 +1,4 @@
-FROM postgres:16-alpine AS builder
+FROM postgres:18-alpine AS builder
 
 ENV POSTGRES_USER=ash
 ENV POSTGRES_PASSWORD=pikachu
@@ -22,7 +22,7 @@ RUN set -e \
     && su-exec postgres pg_ctl stop -D "$PGDATA" -m fast \
     && rm -rf /tmp/init
 
-FROM postgres:16-alpine
+FROM postgres:18-alpine
 
 ENV POSTGRES_USER=ash
 ENV POSTGRES_PASSWORD=pikachu
